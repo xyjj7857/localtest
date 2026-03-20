@@ -5,6 +5,9 @@ import os from "os";
 import CryptoJS from "crypto-js";
 import axios from "axios";
 import { fileURLToPath } from "url";
+import dns from "dns";
+
+const { Resolver } = dns.promises;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,11 +32,7 @@ async function startServer() {
     let publicIp = "Unknown";
     let localIp = "127.0.0.1";
     let debugInfo: any = {
-      publicIpFetch: {
-        command: "GET https://api.ipify.org?format=json",
-        status: 0,
-        error: null
-      },
+      publicIpFetch: [],
       localIpFetch: {
         command: "os.networkInterfaces()",
         status: 200,
@@ -62,17 +61,37 @@ async function startServer() {
       debugInfo.localIpFetch.error = e.message;
     }
 
-    // B. 获取公网 IP (设置 3s 严格超时)
-    try {
-      const response = await axios.get('https://api.ipify.org?format=json', { 
-        timeout: 3000 
-      });
-      publicIp = response.data.ip;
-      debugInfo.publicIpFetch.status = response.status;
-    } catch (e: any) {
-      console.warn(`[PUBLIC IP FETCH FAILED] ${e.message}`);
-      debugInfo.publicIpFetch.status = e.response?.status || 500;
-      debugInfo.publicIpFetch.error = e.message;
+    // B. 获取公网 IP (多渠道备份)
+    const providers = [
+      { name: "ipify", url: "https://api.ipify.org?format=json", parser: (data: any) => data.ip },
+      { name: "ident.me", url: "https://ident.me/.json", parser: (data: any) => data.address },
+      { name: "ip-api", url: "http://ip-api.com/json", parser: (data: any) => data.query },
+      { name: "icanhazip", url: "https://ipv4.icanhazip.com", parser: (data: any) => typeof data === 'string' ? data.trim() : data },
+      { name: "ipinfo", url: "https://ipinfo.io/json", parser: (data: any) => data.ip },
+      { name: "amazon", url: "https://checkip.amazonaws.com", parser: (data: any) => typeof data === 'string' ? data.trim() : data }
+    ];
+
+    for (const provider of providers) {
+      try {
+        const response = await axios.get(provider.url, { timeout: 3000 });
+        const ip = provider.parser(response.data);
+        if (ip && ip !== "Unknown") {
+          publicIp = ip;
+          debugInfo.publicIpFetch.push({
+            provider: provider.name,
+            status: response.status,
+            success: true
+          });
+          break; // 成功获取则跳出循环
+        }
+      } catch (e: any) {
+        debugInfo.publicIpFetch.push({
+          provider: provider.name,
+          status: e.response?.status || 500,
+          success: false,
+          error: e.message
+        });
+      }
     }
 
     // C. 强制返回 JSON 格式
@@ -84,6 +103,34 @@ async function startServer() {
       timestamp: Date.now(),
       debug: debugInfo
     });
+  });
+
+  // 1.5 DNS 解析接口
+  app.post("/api/dns-lookup", async (req, res) => {
+    const { hostname, dnsServer } = req.body;
+    if (!hostname) {
+      return res.status(400).json({ error: "Hostname is required" });
+    }
+
+    const servers = dnsServer ? [dnsServer] : ["8.8.8.8", "114.114.114.114"];
+    const resolver = new Resolver();
+    resolver.setServers(servers);
+
+    try {
+      const addresses = await resolver.resolve4(hostname);
+      res.json({
+        hostname,
+        servers,
+        addresses,
+        timestamp: Date.now()
+      });
+    } catch (e: any) {
+      res.status(500).json({
+        error: `DNS lookup failed: ${e.message}`,
+        hostname,
+        servers
+      });
+    }
   });
 
   // 2. 币安代理接口

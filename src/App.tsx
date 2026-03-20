@@ -101,10 +101,11 @@ export default function App() {
       
       // Detailed logging for public IP fetch
       if (data.debug) {
-        if (data.debug.publicIpFetch) {
-          const { command, status, error } = data.debug.publicIpFetch;
-          const logMsg = `获取公网 IP 指令: ${command}, 响应代码: ${status}${error ? `, 错误: ${error}` : ""}`;
-          addLog(logMsg, status === 200 ? "info" : "error", "SYSTEM");
+        if (Array.isArray(data.debug.publicIpFetch)) {
+          data.debug.publicIpFetch.forEach((attempt: any) => {
+            const logMsg = `[IP提供商: ${attempt.provider}] 状态: ${attempt.status}, 结果: ${attempt.success ? "成功" : "失败"}${attempt.error ? `, 错误: ${attempt.error}` : ""}`;
+            addLog(logMsg, attempt.success ? "info" : "error", "SYSTEM");
+          });
         }
         if (data.debug.localIpFetch) {
           const { command, status, error } = data.debug.localIpFetch;

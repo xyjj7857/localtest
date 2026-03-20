@@ -42,7 +42,31 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, on
     { id: "order", label: "仓单设置", icon: Zap },
     { id: "email", label: "邮件通知", icon: Mail },
     { id: "security", label: "安全设置", icon: Shield },
+    { id: "network", label: "网络工具", icon: Globe },
   ];
+
+  const [dnsHostname, setDnsHostname] = useState("fapi.binance.com");
+  const [dnsServer, setDnsServer] = useState("8.8.8.8");
+  const [dnsResult, setDnsResult] = useState<any>(null);
+  const [isDnsLoading, setIsDnsLoading] = useState(false);
+
+  const handleDnsLookup = async () => {
+    setIsDnsLoading(true);
+    setDnsResult(null);
+    try {
+      const res = await fetch("/api/dns-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hostname: dnsHostname, dnsServer }),
+      });
+      const data = await res.json();
+      setDnsResult(data);
+    } catch (e: any) {
+      setDnsResult({ error: e.message });
+    } finally {
+      setIsDnsLoading(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white text-zinc-900">
@@ -173,6 +197,59 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, on
                     value={localSettings.binance.wsUrl}
                     onChange={(v) => handleChange("binance.wsUrl", v)}
                   />
+                </div>
+              </div>
+            )}
+
+            {activeTab === "network" && (
+              <div className="space-y-6">
+                <SectionHeader title="网络工具" description="DNS 解析与网络诊断" />
+                
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-6 space-y-4">
+                  <h4 className="text-sm font-bold text-zinc-900">DNS 解析测试</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input 
+                      label="主机名 (Hostname)" 
+                      value={dnsHostname} 
+                      onChange={setDnsHostname} 
+                    />
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium uppercase tracking-wider text-zinc-400">DNS 服务器</label>
+                      <select 
+                        value={dnsServer}
+                        onChange={(e) => setDnsServer(e.target.value)}
+                        className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition-all focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50"
+                      >
+                        <option value="8.8.8.8">Google (8.8.8.8)</option>
+                        <option value="114.114.114.114">114 DNS (114.114.114.114)</option>
+                        <option value="1.1.1.1">Cloudflare (1.1.1.1)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleDnsLookup}
+                    disabled={isDnsLoading}
+                    className="flex w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {isDnsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                    开始解析
+                  </button>
+
+                  {dnsResult && (
+                    <div className="mt-4 rounded-md bg-zinc-900 p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+                      {dnsResult.error ? (
+                        <p className="text-red-400">{dnsResult.error}</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-emerald-400">解析成功:</p>
+                          <p>主机: {dnsResult.hostname}</p>
+                          <p>服务器: {dnsResult.servers.join(", ")}</p>
+                          <p>地址: {dnsResult.addresses.join(", ")}</p>
+                          <p className="text-zinc-500">时间: {new Date(dnsResult.timestamp).toLocaleString()}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
