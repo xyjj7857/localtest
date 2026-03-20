@@ -3,6 +3,11 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import os from "os";
 import CryptoJS from "crypto-js";
+import axios from "axios";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -18,104 +23,99 @@ async function startServer() {
   // API routes
   app.get("/api/server-info", async (req, res) => {
     try {
-      const response = await fetch('https://api.ipify.org?format=json');
-      const data = await response.json();
-      res.json({ 
-        ip: data.ip,
-        hostname: os.hostname()
-      });
-    } catch (error) {
+      // Try to get public IP
+      let publicIp = "Unknown";
+      try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        publicIp = data.ip;
+      } catch (e) {
+        console.error("Failed to get public IP", e);
+      }
+      
+      // Get local IP
       const interfaces = os.networkInterfaces();
       let localIp = "127.0.0.1";
       for (const k in interfaces) {
-        for (const k2 in interfaces[k]!) {
-          const address = interfaces[k][k2]!;
-          if (address.family === "IPv4" && !address.internal) {
-            localIp = address.address;
-            break;
+        const networkInterface = interfaces[k];
+        if (networkInterface) {
+          for (const address of networkInterface) {
+            if (address.family === 'IPv4' && !address.internal) {
+              localIp = address.address;
+              break;
+            }
           }
         }
+        if (localIp !== "127.0.0.1") break;
       }
-      res.json({ ip: localIp, hostname: os.hostname() });
+
+      res.json({ 
+        ip: publicIp,
+        localIp: localIp,
+        hostname: os.hostname()
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get server info" });
     }
   });
 
-  // Binance Proxy Route
-  app.post("/api/binance-proxy", async (req, res) => {
-    const { method, endpoint, params, apiKey, apiSecret } = req.body;
+  // Binance Proxy
+  app.all("/api/binance/*", async (req, res) => {
+    const apiPath = req.params[0];
+    const method = req.method;
+    const apiKey = req.headers["x-mbx-apikey"] as string;
+    const apiSecret = req.headers["x-mbx-apisecret"] as string;
+    const baseUrl = req.headers["x-mbx-baseurl"] as string || "https://fapi.binance.com";
 
-    if (!apiKey || !apiSecret) {
-      return res.status(400).json({ error: "Missing API credentials" });
+    // Public endpoints don't need API key/secret
+    const isPublic = apiPath.includes("exchangeInfo") || apiPath.includes("klines") || apiPath.includes("ticker");
+
+    if (!isPublic && (!apiKey || !apiSecret)) {
+      return res.status(401).json({ error: "API Key and Secret are required for private endpoints" });
     }
 
     try {
-      const timestamp = Date.now();
-      const baseParams = {
-        ...(params || {}),
-        timestamp: timestamp.toString(),
-      };
+      let fullUrl = `${baseUrl}/${apiPath}`;
+      let queryString = "";
+      
+      const queryParams: any = { ...req.query };
+      
+      if (!isPublic) {
+        queryParams.timestamp = Date.now();
+        queryString = Object.entries(queryParams)
+          .map(([key, val]) => `${key}=${encodeURIComponent(String(val))}`)
+          .join("&");
+        const signature = getSignature(queryString, apiSecret);
+        fullUrl = `${fullUrl}?${queryString}&signature=${signature}`;
+      } else {
+        queryString = Object.entries(queryParams)
+          .map(([key, val]) => `${key}=${encodeURIComponent(String(val))}`)
+          .join("&");
+        if (queryString) {
+          fullUrl = `${fullUrl}?${queryString}`;
+        }
+      }
 
-      const queryString = new URLSearchParams(baseParams).toString();
-      const signature = getSignature(queryString, apiSecret);
-      
-      const safeEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-      const baseUrl = req.body.baseUrl || "https://fapi.binance.com";
-      
-      let url = `${baseUrl}${safeEndpoint}`;
-      let options: RequestInit = {
-        method: method || "GET",
-        headers: {
+      const response = await axios({
+        method,
+        url: fullUrl,
+        headers: isPublic ? {} : {
           "X-MBX-APIKEY": apiKey,
         },
-      };
+        data: req.body,
+        timeout: 15000,
+      });
 
-      if (options.method === "POST" || options.method === "PUT" || options.method === "DELETE") {
-        // For these methods, we can send params in the body
-        const bodyParams = new URLSearchParams({
-          ...baseParams,
-          signature: signature,
-        });
-        options.body = bodyParams.toString();
-        options.headers = {
-          ...options.headers,
-          "Content-Type": "application/x-www-form-urlencoded",
-        };
-      } else {
-        // For GET, params must be in the query string
-        url += `?${queryString}&signature=${signature}`;
-      }
-
-      console.log(`Proxying ${options.method} request to: ${url}`);
-
-      const response = await fetch(url, options);
-
-      const contentType = response.headers.get("content-type");
-      const responseText = await response.text();
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        console.error("Binance non-JSON response from URL:", url);
-        console.error("Response snippet:", responseText.substring(0, 500));
-        return res.status(response.status).json({ 
-          error: "Binance API returned a non-JSON response (likely an HTML error page).",
-          status: response.status,
-          url: url,
-          details: responseText.substring(0, 500)
-        });
-      }
-
-      res.status(response.status).json(data);
+      res.status(response.status).json(response.data);
     } catch (error: any) {
-      console.error("Binance Proxy Error:", error);
-      res.status(500).json({ error: error.message || "Internal Server Error" });
+      console.error(`Binance Proxy Error [${apiPath}]:`, error.response?.data || error.message);
+      res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
     }
   });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
@@ -130,7 +130,23 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    
+    // Log local IP for user reference
+    const interfaces = os.networkInterfaces();
+    for (const k in interfaces) {
+      const networkInterface = interfaces[k];
+      if (networkInterface) {
+        for (const address of networkInterface) {
+          if (address.family === 'IPv4' && !address.internal) {
+            console.log(`Local IP: http://${address.address}:${PORT}`);
+          }
+        }
+      }
+    }
   });
 }
+
+// Import createServer from vite
+import { createServer } from "vite";
 
 startServer();

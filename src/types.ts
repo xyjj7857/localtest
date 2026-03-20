@@ -1,71 +1,123 @@
-export interface ApiConfig {
+export interface BinanceSettings {
   apiKey: string;
-  apiSecret: string;
-  passphrase?: string;
+  secretKey: string;
   baseUrl: string;
+  wsUrl: string;
 }
 
-export interface OrderForm {
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  type: 'MARKET' | 'LIMIT';
-  amount: number;
-  price?: number;
+export interface SupabaseSettings {
+  projectUrl: string;
+  publishableKey: string;
+  connectionString: string;
+  tableName: string;
 }
 
-export interface Position {
+export interface ScannerSettings {
+  stage0: {
+    enabled: boolean;
+    interval: string;
+    startTime: string;
+    klinePeriod: string;
+    minKlines: number;
+    maxKlines: number;
+    customScanMinutes: number;
+  };
+  stage0P: {
+    enabled: boolean;
+    interval: string;
+    startTime: string;
+    check15m: { enabled: boolean; count: number; threshold: number };
+    check1h: { enabled: boolean; count: number; threshold: number };
+    check4h: { enabled: boolean; count: number; threshold: number };
+    check1d: { enabled: boolean; count: number; threshold: number };
+  };
+  stage1: {
+    enabled: boolean;
+    interval: string;
+    startTime: string;
+    minVolumeM1: number;
+    k1Range: { enabled: boolean; range: [number, number] };
+    whitelist: string[];
+    blacklist: string[];
+  };
+  stage2: {
+    enabled: boolean;
+    interval: string;
+    startTime: string;
+    cooldown: number;
+    k2Range: { enabled: boolean; range: [number, number] };
+    aRange: { enabled: boolean; range: [number, number] };
+    mRange: { enabled: boolean; range: [number, number] };
+    k5Range: { enabled: boolean; range: [number, number] };
+    kbRange: { enabled: boolean; range: [number, number] };
+  };
+}
+
+export interface OrderSettings {
+  leverage: number;
+  positionRatio: number;
+  maxPositionUsdt: number;
+  tpRatio: number;
+  slRatio: number;
+  orderWindowSeconds: number;
+  maxHoldMinutes: number;
+  kOptimalPeriod: string;
+  kOptimalWindow: [number, number];
+}
+
+export interface EmailSettings {
+  enabled: boolean;
+  fromEmail: string;
+  toEmail: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpPass: string;
+  balanceThreshold: number;
+  consecutiveLossThreshold: number;
+}
+
+export interface SecuritySettings {
+  lockPassword: string;
+  autoLockMinutes: number;
+}
+
+export interface AppSettings {
+  binance: BinanceSettings;
+  supabase: SupabaseSettings;
+  scanner: ScannerSettings;
+  order: OrderSettings;
+  email: EmailSettings;
+  security: SecuritySettings;
+}
+
+export interface LogEntry {
   id: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  positionSide: string; // 'BOTH', 'LONG', or 'SHORT'
-  entryPrice: number;
-  markPrice: number;
-  amount: number;
-  pnl: number;
-  pnlPercent: number;
   timestamp: number;
-}
-
-export interface PositionHistory {
-  id: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  positionSide: string;
-  entryPrice: number;
-  exitPrice: number;
-  amount: number;
-  pnl: number; // True PnL (tradePnl + commission + fundingFee)
-  tradePnl: number; // Price difference PnL
-  commission: number;
-  fundingFee: number;
-  pnlPercent: number;
-  openTime: number;
-  closeTime: number;
-  timestamp: number;
-}
-
-export interface TradeLog {
-  id: string;
-  timestamp: number;
-  type: 'INFO' | 'SUCCESS' | 'ERROR' | 'TRADE';
+  level: 'info' | 'warn' | 'error' | 'success';
   message: string;
+  module: string;
 }
 
-export interface AccountBalance {
-  asset: string;
-  balance: number;
-  available: number;
-  unrealizedPnl: number;
-}
-
-export interface OpenOrder {
+export interface TradeReport {
   id: string;
   symbol: string;
   side: 'BUY' | 'SELL';
-  type: string;
+  entryPrice: number;
+  exitPrice?: number;
+  quantity: number;
+  pnl?: number;
+  entryTime: number;
+  exitTime?: number;
+  status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+}
+
+export interface SymbolData {
+  symbol: string;
   price: number;
-  stopPrice?: number;
-  isAlgo: boolean;
-  time: number;
-  positionSide: string;
+  change15m: number;
+  volume15m: number;
+  high15m: number;
+  low15m: number;
+  open15m: number;
+  lastUpdate: number;
 }
