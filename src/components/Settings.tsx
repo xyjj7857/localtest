@@ -7,11 +7,12 @@ interface SettingsProps {
   settings: AppSettings;
   onSave: (settings: AppSettings) => void;
   onSync: () => void;
+  onRefreshIp: () => void;
   defaultSettings: AppSettings;
   ipAddress: string;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, defaultSettings, ipAddress }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, onRefreshIp, defaultSettings, ipAddress }) => {
   const [activeTab, setActiveTab] = useState<"api" | "supabase" | "scanner" | "order" | "email" | "security">("api");
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
 
@@ -118,7 +119,16 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, de
                       </div>
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">服务器公网 IP (ECS Public IP)</p>
-                        <p className="font-mono text-sm font-bold text-emerald-600">{ipAddress}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-sm font-bold text-emerald-600">{ipAddress}</p>
+                          <button 
+                            onClick={onRefreshIp}
+                            className="rounded p-0.5 hover:bg-emerald-200 text-emerald-600 transition-colors"
+                            title="刷新 IP"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <div className="text-right">

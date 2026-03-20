@@ -59,12 +59,6 @@ export default function App() {
   const [isStrategyRunning, setIsStrategyRunning] = useState(true);
   const [ipAddress, setIpAddress] = useState<string>("127.0.0.1");
 
-  useEffect(() => {
-    fetch("/api/system/ip")
-      .then(res => res.json())
-      .then(data => setIpAddress(data.ip))
-      .catch(() => setIpAddress("Unknown (Server)"));
-  }, []);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reports, setReports] = useState<TradeReport[]>([]);
@@ -94,6 +88,23 @@ export default function App() {
       ...prev.slice(0, 99),
     ]);
   }, []);
+
+  const refreshIp = useCallback(async () => {
+    setIpAddress("正在更新...");
+    try {
+      const res = await fetch("/api/system/ip?refresh=true");
+      const data = await res.json();
+      setIpAddress(data.ip);
+      addLog(`服务器出口 IP 已更新: ${data.ip}`, "info", "SYSTEM");
+    } catch (e) {
+      setIpAddress("获取失败");
+      addLog("刷新服务器 IP 失败", "error", "SYSTEM");
+    }
+  }, [addLog]);
+
+  useEffect(() => {
+    refreshIp();
+  }, [refreshIp]);
 
   // Scanner Logic
   const runScanner = useCallback(async () => {
@@ -550,6 +561,7 @@ export default function App() {
                   settings={settings} 
                   onSave={handleSaveSettings} 
                   onSync={handleSyncSupabase} 
+                  onRefreshIp={refreshIp}
                   defaultSettings={DEFAULT_SETTINGS}
                   ipAddress={ipAddress}
                 />

@@ -23,29 +23,53 @@ let lastOutboundIp = "正在获取...";
  */
 async function updateOutboundIp() {
   const services = [
-    "https://api.ipify.org?format=json",
-    "https://api64.ipify.org?format=json",
-    "https://ident.me/.json",
-    "https://ifconfig.me/all.json"
+    // 优先尝试阿里云 ECS 内部元数据服务 (最快且最可靠)
+    { url: "http://100.100.100.200/latest/meta-data/public-ipv4", type: "text" },
+    // 备用国内/国际通用服务
+    { url: "https://api.ipify.org?format=json", type: "json" },
+    { url: "https://myip.ipip.net/s", type: "text" }, // 国内常用的 IPIP.net
+    { url: "https://ddns.oray.com/checkip", type: "text" }, // 花生壳
+    { url: "https://ifconfig.me/ip", type: "text" }
   ];
 
+  console.log(`[SYSTEM] 正在启动公网 IP 识别程序，共有 ${services.length} 个备选源...`);
+
   for (const service of services) {
+    const hostname = new URL(service.url).hostname;
     try {
-      const response = await axios.get(service, { timeout: 3000 });
-      const ip = response.data.ip || response.data.ip_addr || response.data.query;
-      if (ip) {
+      console.log(`[SYSTEM] 正在尝试通过源 [${hostname}] 获取 IP...`);
+      const response = await axios.get(service.url, { timeout: 3000 });
+      let ip = "";
+      
+      if (service.type === "json") {
+        ip = response.data.ip || response.data.ip_addr || response.data.query;
+      } else {
+        // 处理纯文本返回，并过滤掉可能的换行符
+        ip = String(response.data).trim();
+      }
+
+      // 简单的 IP 格式校验
+      if (ip && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ip)) {
+        const oldIp = lastOutboundIp;
         lastOutboundIp = ip;
-        console.log(`[SYSTEM] 识别到阿里云 ECS 公网 IP: ${lastOutboundIp} (via ${new URL(service).hostname})`);
-        console.log(`[SYSTEM] 请确保在币安 API 设置中已将此 IP 加入白名单。`);
+        console.log(`[SYSTEM] 识别成功! 来源: ${hostname}, 获取到的 IP: ${lastOutboundIp}`);
+        if (oldIp !== "正在获取..." && oldIp !== ip) {
+          console.log(`[SYSTEM] 检测到 IP 变动: ${oldIp} -> ${ip}`);
+        }
         return;
+      } else {
+        console.warn(`[SYSTEM] 源 [${hostname}] 返回了无效的 IP 格式: "${ip.substring(0, 50)}"`);
       }
     } catch (e: any) {
-      console.warn(`[SYSTEM] 尝试通过 ${service} 获取 IP 失败: ${e.message}`);
+      console.warn(`[SYSTEM] 源 [${hostname}] 获取失败: ${e.message}`);
     }
   }
   
   if (lastOutboundIp === "正在获取...") {
-    lastOutboundIp = "识别失败 (请检查服务器网络)";
+    lastOutboundIp = "识别失败 (请检查安全组设置)";
+    console.error("[SYSTEM] 关键错误: 所有备选源均无法获取公网 IP。请检查服务器出方向网络及安全组设置。");
+  } else {
+    console.warn("[SYSTEM] 本次自动更新 IP 失败，将继续使用旧 IP: " + lastOutboundIp);
   }
 }
 
