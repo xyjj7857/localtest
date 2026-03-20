@@ -22,16 +22,29 @@ async function startServer() {
 
   // API routes
   app.get("/api/server-info", async (req, res) => {
+    const publicIpUrl = 'https://api.ipify.org?format=json';
+    let publicIp = "Unknown";
+    let publicIpStatus = 0;
+    let publicIpError = null;
+
     try {
-      // Try to get public IP using axios
-      let publicIp = "Unknown";
-      try {
-        const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
-        publicIp = response.data.ip;
-      } catch (e) {
-        console.error("获取公网IP失败", e);
-      }
-      
+      console.log(`[SYSTEM] Executing public IP fetch: GET ${publicIpUrl}`);
+      const response = await axios.get(publicIpUrl, { 
+        timeout: 5000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      publicIp = response.data.ip;
+      publicIpStatus = response.status;
+      console.log(`[SYSTEM] Public IP fetch success. Status: ${publicIpStatus}, IP: ${publicIp}`);
+    } catch (e: any) {
+      publicIpStatus = e.response?.status || 500;
+      publicIpError = e.message;
+      console.error(`[SYSTEM] Public IP fetch failed. Status: ${publicIpStatus}, Error: ${publicIpError}`);
+    }
+    
+    try {
       // Get local IP
       const interfaces = os.networkInterfaces();
       let localIp = "127.0.0.1";
@@ -51,7 +64,14 @@ async function startServer() {
       res.json({ 
         ip: publicIp,
         localIp: localIp,
-        hostname: os.hostname()
+        hostname: os.hostname(),
+        debug: {
+          publicIpFetch: {
+            command: `GET ${publicIpUrl}`,
+            status: publicIpStatus,
+            error: publicIpError
+          }
+        }
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to get server info" });
@@ -95,13 +115,27 @@ async function startServer() {
         }
       }
 
+      const headers: any = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+      };
+
+      if (method !== "GET" && method !== "DELETE") {
+        headers["Content-Type"] = "application/json";
+      }
+
+      if (!isPublic) {
+        headers["X-MBX-APIKEY"] = apiKey;
+      }
+
       const response = await axios({
         method,
         url: fullUrl,
-        headers: isPublic ? {} : {
-          "X-MBX-APIKEY": apiKey,
-        },
-        data: req.body,
+        headers,
+        data: (method === "GET" || method === "DELETE") ? undefined : req.body,
         timeout: 15000,
       });
 
@@ -114,7 +148,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createServer({
+    const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
@@ -144,8 +178,5 @@ async function startServer() {
     }
   });
 }
-
-// Import createServer from vite
-import { createServer } from "vite";
 
 startServer();
