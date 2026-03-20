@@ -100,10 +100,17 @@ export default function App() {
       setLocalIp(data.localIp || "127.0.0.1");
       
       // Detailed logging for public IP fetch
-      if (data.debug && data.debug.publicIpFetch) {
-        const { command, status, error } = data.debug.publicIpFetch;
-        const logMsg = `获取公网 IP 指令: ${command}, 响应代码: ${status}${error ? `, 错误: ${error}` : ""}`;
-        addLog(logMsg, status === 200 ? "info" : "error", "SYSTEM");
+      if (data.debug) {
+        if (data.debug.publicIpFetch) {
+          const { command, status, error } = data.debug.publicIpFetch;
+          const logMsg = `获取公网 IP 指令: ${command}, 响应代码: ${status}${error ? `, 错误: ${error}` : ""}`;
+          addLog(logMsg, status === 200 ? "info" : "error", "SYSTEM");
+        }
+        if (data.debug.localIpFetch) {
+          const { command, status, error } = data.debug.localIpFetch;
+          const logMsg = `获取内网 IP 指令: ${command}, 响应代码: ${status}${error ? `, 错误: ${error}` : ""}`;
+          addLog(logMsg, status === 200 ? "info" : "error", "SYSTEM");
+        }
       }
       
       addLog(`服务器 IP 已更新: 公网 ${data.ip}, 内网 ${data.localIp}`, "info", "SYSTEM");
