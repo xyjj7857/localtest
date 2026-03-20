@@ -19,20 +19,33 @@ let lastOutboundIp = "正在获取...";
 
 /**
  * 2. 定义异步函数：更新服务器出口 IP
- * 使用外部服务 api.ipify.org 获取当前公网 IP
+ * 尝试多个服务以确保在不同环境下都能获取到公网 IP
  */
 async function updateOutboundIp() {
-  try {
-    // 发送 GET 请求，设置 5 秒超时，防止因网络问题导致程序阻塞
-    const response = await axios.get("https://api.ipify.org?format=json", { timeout: 5000 });
-    
-    // 将获取到的 IP 地址更新到全局变量中
-    lastOutboundIp = response.data.ip;
-    console.log(`服务器出口 IP 已更新: ${lastOutboundIp}`);
-  } catch (e: any) {
-    // 如果获取失败（如网络波动、服务不可用），在控制台记录错误
-    // 此时 lastOutboundIp 将保持原值，不会导致程序崩溃
-    console.error("获取出口 IP 失败:", e.message);
+  const services = [
+    "https://api.ipify.org?format=json",
+    "https://api64.ipify.org?format=json",
+    "https://ident.me/.json",
+    "https://ifconfig.me/all.json"
+  ];
+
+  for (const service of services) {
+    try {
+      const response = await axios.get(service, { timeout: 3000 });
+      const ip = response.data.ip || response.data.ip_addr || response.data.query;
+      if (ip) {
+        lastOutboundIp = ip;
+        console.log(`[SYSTEM] 识别到阿里云 ECS 公网 IP: ${lastOutboundIp} (via ${new URL(service).hostname})`);
+        console.log(`[SYSTEM] 请确保在币安 API 设置中已将此 IP 加入白名单。`);
+        return;
+      }
+    } catch (e: any) {
+      console.warn(`[SYSTEM] 尝试通过 ${service} 获取 IP 失败: ${e.message}`);
+    }
+  }
+  
+  if (lastOutboundIp === "正在获取...") {
+    lastOutboundIp = "识别失败 (请检查服务器网络)";
   }
 }
 

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Save, RefreshCw, Shield, Mail, Search, Zap, Key, Database } from "lucide-react";
+import { Save, RefreshCw, Shield, Mail, Search, Zap, Key, Database, Globe } from "lucide-react";
 import { AppSettings } from "../types";
 import { motion } from "motion/react";
 
@@ -8,9 +8,10 @@ interface SettingsProps {
   onSave: (settings: AppSettings) => void;
   onSync: () => void;
   defaultSettings: AppSettings;
+  ipAddress: string;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, defaultSettings }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, defaultSettings, ipAddress }) => {
   const [activeTab, setActiveTab] = useState<"api" | "supabase" | "scanner" | "order" | "email" | "security">("api");
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
 
@@ -107,6 +108,25 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, de
             {activeTab === "api" && (
               <div className="space-y-6">
                 <SectionHeader title="Binance API 配置" description="配置您的币安 API 密钥以进行交易和行情获取" />
+                
+                {/* Server IP Info Box */}
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-full bg-emerald-100 p-1.5 text-emerald-600">
+                        <Globe className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">服务器公网 IP (ECS Public IP)</p>
+                        <p className="font-mono text-sm font-bold text-emerald-600">{ipAddress}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-medium text-emerald-700/60">请将此 IP 添加至币安 API 白名单</p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid gap-4">
                   <Input
                     label="Binance API Key"

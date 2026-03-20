@@ -425,7 +425,7 @@ export default function App() {
       <div className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-1.5 text-[10px] font-mono font-bold tracking-wider text-zinc-500">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          INSTRUCTION IP: {ipAddress}
+          服务器公网 IP: {ipAddress}
         </div>
         <div className="flex items-center gap-4">
           <span>LATENCY: 24ms</span>
@@ -551,6 +551,7 @@ export default function App() {
                   onSave={handleSaveSettings} 
                   onSync={handleSyncSupabase} 
                   defaultSettings={DEFAULT_SETTINGS}
+                  ipAddress={ipAddress}
                 />
               )}
             </motion.div>
