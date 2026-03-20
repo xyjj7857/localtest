@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Save, RefreshCw, Shield, Mail, Search, Zap, Key, Database, Globe } from "lucide-react";
+import { Save, RefreshCw, Shield, Mail, Search, Zap, Key, Database, Globe, Copy, Check } from "lucide-react";
 import { AppSettings } from "../types";
 import { motion } from "motion/react";
 
@@ -16,6 +16,13 @@ interface SettingsProps {
 export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, onRefreshIp, defaultSettings, ipAddress, localIp }) => {
   const [activeTab, setActiveTab] = useState<"api" | "supabase" | "scanner" | "order" | "email" | "security">("api");
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
 
   const handleReset = () => {
     if (window.confirm("确定要恢复默认设置吗？所有当前修改将被覆盖。")) {
@@ -123,13 +130,22 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, on
                           <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">服务器公网 IP (Public IP)</p>
                           <div className="flex items-center gap-2">
                             <p className="font-mono text-sm font-bold text-emerald-600">{ipAddress}</p>
-                            <button 
-                              onClick={onRefreshIp}
-                              className="rounded p-0.5 hover:bg-emerald-200 text-emerald-600 transition-colors"
-                              title="刷新 IP"
-                            >
-                              <RefreshCw className="h-3 w-3" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={onRefreshIp}
+                                className="rounded p-0.5 hover:bg-emerald-200 text-emerald-600 transition-colors"
+                                title="刷新 IP"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                              </button>
+                              <button 
+                                onClick={() => copyToClipboard(ipAddress, 'public')}
+                                className="rounded p-0.5 hover:bg-emerald-200 text-emerald-600 transition-colors"
+                                title="复制 IP"
+                              >
+                                {copiedField === 'public' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -142,9 +158,18 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onSync, on
                       <div className="rounded-full bg-blue-100 p-1.5 text-blue-600">
                         <Globe className="h-4 w-4" />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <p className="text-xs font-bold uppercase tracking-wider text-blue-800">本地服务器 IP (Local IP)</p>
-                        <p className="font-mono text-sm font-bold text-blue-600">{localIp}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-sm font-bold text-blue-600">{localIp}</p>
+                          <button 
+                            onClick={() => copyToClipboard(localIp, 'local')}
+                            className="rounded p-0.5 hover:bg-blue-200 text-blue-600 transition-colors"
+                            title="复制 IP"
+                          >
+                            {copiedField === 'local' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
