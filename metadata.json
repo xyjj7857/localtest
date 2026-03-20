@@ -1,0 +1,5 @@
+{
+  "name": "本地超强 - 币安量化交易系统",
+  "description": "基于币安 U 本位永续合约的超强量化交易终端，集成多级扫描、实时监控与自动化下单功能。",
+  "requestFramePermissions": []
+}
