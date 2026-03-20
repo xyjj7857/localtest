@@ -11,43 +11,26 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
+  // 1. 中间件配置
   app.use(express.json());
 
-  // Helper for Binance Signature
+  // 签名助手函数
   const getSignature = (queryString: string, secret: string) => {
     return CryptoJS.HmacSHA256(queryString, secret).toString(CryptoJS.enc.Hex);
   };
 
-  // API routes
-  app.get("/api/server-info", async (req, res) => {
-    const publicIpUrl = 'https://api.ipify.org?format=json';
-    let publicIp = "Unknown";
-    let publicIpStatus = 0;
-    let publicIpError = null;
+  // --- API 路由开始 (必须放在静态资源处理之前) ---
 
+  // 获取服务器信息 (IP/Hostname)
+  app.get("/api/server-info", async (req, res) => {
+    let publicIp = "Unknown";
+    let localIp = "127.0.0.1";
+
+    // 获取本地内网 IP
     try {
-      console.log(`[SYSTEM] Executing public IP fetch: GET ${publicIpUrl}`);
-      const response = await axios.get(publicIpUrl, { 
-        timeout: 5000,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      });
-      publicIp = response.data.ip;
-      publicIpStatus = response.status;
-      console.log(`[SYSTEM] Public IP fetch success. Status: ${publicIpStatus}, IP: ${publicIp}`);
-    } catch (e: any) {
-      publicIpStatus = e.response?.status || 500;
-      publicIpError = e.message;
-      console.error(`[SYSTEM] Public IP fetch failed. Status: ${publicIpStatus}, Error: ${publicIpError}`);
-    }
-    
-    try {
-      // Get local IP
       const interfaces = os.networkInterfaces();
-      let localIp = "127.0.0.1";
       for (const k in interfaces) {
         const networkInterface = interfaces[k];
         if (networkInterface) {
@@ -60,25 +43,30 @@ async function startServer() {
         }
         if (localIp !== "127.0.0.1") break;
       }
-
-      res.json({ 
-        ip: publicIp,
-        localIp: localIp,
-        hostname: os.hostname(),
-        debug: {
-          publicIpFetch: {
-            command: `GET ${publicIpUrl}`,
-            status: publicIpStatus,
-            error: publicIpError
-          }
-        }
-      });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to get server info" });
+    } catch (e) {
+      console.error("[ERROR] Local IP fetch error:", e);
     }
+
+    // 尝试获取公网 IP (增加超时保护)
+    try {
+      const response = await axios.get('https://api.ipify.org?format=json', { 
+        timeout: 3000 // 3秒超时，防止部署环境无法上外网导致接口挂起
+      });
+      publicIp = response.data.ip;
+    } catch (e: any) {
+      console.warn(`[WARN] Public IP fetch failed: ${e.message}. (Server may have no internet access)`);
+    }
+
+    // 始终返回 JSON，避免前端解析 HTML 报错
+    res.json({ 
+      ip: publicIp,
+      localIp: localIp,
+      hostname: os.hostname(),
+      timestamp: Date.now()
+    });
   });
 
-  // Binance Proxy
+  // 币安代理接口
   app.all("/api/binance/*", async (req, res) => {
     const apiPath = req.params[0];
     const method = req.method;
@@ -86,97 +74,77 @@ async function startServer() {
     const apiSecret = req.headers["x-mbx-apisecret"] as string;
     const baseUrl = req.headers["x-mbx-baseurl"] as string || "https://fapi.binance.com";
 
-    // Public endpoints don't need API key/secret
     const isPublic = apiPath.includes("exchangeInfo") || apiPath.includes("klines") || apiPath.includes("ticker");
 
     if (!isPublic && (!apiKey || !apiSecret)) {
-      return res.status(401).json({ error: "API Key and Secret are required for private endpoints" });
+      return res.status(401).json({ error: "API Key and Secret are required" });
     }
 
     try {
       let fullUrl = `${baseUrl}/${apiPath}`;
-      let queryString = "";
-      
       const queryParams: any = { ...req.query };
       
       if (!isPublic) {
         queryParams.timestamp = Date.now();
-        queryString = Object.entries(queryParams)
+        const queryString = Object.entries(queryParams)
           .map(([key, val]) => `${key}=${encodeURIComponent(String(val))}`)
           .join("&");
         const signature = getSignature(queryString, apiSecret);
         fullUrl = `${fullUrl}?${queryString}&signature=${signature}`;
       } else {
-        queryString = Object.entries(queryParams)
-          .map(([key, val]) => `${key}=${encodeURIComponent(String(val))}`)
-          .join("&");
-        if (queryString) {
-          fullUrl = `${fullUrl}?${queryString}`;
-        }
-      }
-
-      const headers: any = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-      };
-
-      if (method !== "GET" && method !== "DELETE") {
-        headers["Content-Type"] = "application/json";
-      }
-
-      if (!isPublic) {
-        headers["X-MBX-APIKEY"] = apiKey;
+        const queryString = new URLSearchParams(req.query as any).toString();
+        if (queryString) fullUrl = `${fullUrl}?${queryString}`;
       }
 
       const response = await axios({
         method,
         url: fullUrl,
-        headers,
+        headers: {
+          "X-MBX-APIKEY": apiKey || "",
+          "Content-Type": "application/json"
+        },
         data: (method === "GET" || method === "DELETE") ? undefined : req.body,
-        timeout: 15000,
+        timeout: 10000,
       });
 
       res.status(response.status).json(response.data);
     } catch (error: any) {
-      console.error(`Binance Proxy Error [${apiPath}]:`, error.response?.data || error.message);
       res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
     }
   });
 
-  // Vite middleware for development
+  // --- 静态资源与生产环境处理 ---
+
   if (process.env.NODE_ENV !== "production") {
+    // 开发模式：使用 Vite 中间件
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
+    console.log("[MODE] Running in Development (Vite)");
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    // 生产模式：先服务静态文件，最后兜底 index.html
+    const distPath = path.resolve(__dirname, '../dist'); // 根据你的目录结构调整
     app.use(express.static(distPath));
+    
+    // 只有非 API 请求才返回 index.html
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: "API Route not found" });
+      }
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
+    console.log("[MODE] Running in Production (Static)");
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-    
-    // Log local IP for user reference
-    const interfaces = os.networkInterfaces();
-    for (const k in interfaces) {
-      const networkInterface = interfaces[k];
-      if (networkInterface) {
-        for (const address of networkInterface) {
-          if (address.family === 'IPv4' && !address.internal) {
-            console.log(`Local IP: http://${address.address}:${PORT}`);
-          }
-        }
-      }
-    }
+    console.log(`-----------------------------------------`);
+    console.log(`🚀 Server ready at http://localhost:${PORT}`);
+    console.log(`-----------------------------------------`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});
