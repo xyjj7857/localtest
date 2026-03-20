@@ -23,14 +23,13 @@ async function startServer() {
   // API routes
   app.get("/api/server-info", async (req, res) => {
     try {
-      // Try to get public IP
+      // Try to get public IP using axios
       let publicIp = "Unknown";
       try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        publicIp = data.ip;
+        const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+        publicIp = response.data.ip;
       } catch (e) {
-        console.error("Failed to get public IP", e);
+        console.error("获取公网IP失败", e);
       }
       
       // Get local IP
