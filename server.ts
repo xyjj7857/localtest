@@ -1,8 +1,10 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import os from "os";
 import axios from "axios";
 import crypto from "crypto";
+import CryptoJS from "crypto-js";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 
@@ -13,93 +15,197 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// 1. 定义全局变量，用于缓存最后一次获取到的出口 IP 地址
-// 初始值为“正在获取...”，在前端展示时作为加载状态
+// 1. 全局变量缓存
 let lastOutboundIp = "正在获取...";
+let serverHostname = os.hostname();
 
 /**
- * 2. 定义异步函数：更新服务器出口 IP
- * 尝试多个服务以确保在不同环境下都能获取到公网 IP
+ * 2. 优化后的 IP 更新函数
+ * 采用并发竞速模式，并增加本地 IP 回退机制
  */
 async function updateOutboundIp() {
-  const services = [
-    // 优先尝试阿里云 ECS 内部元数据服务 (最快且最可靠)
-    { url: "http://100.100.100.200/latest/meta-data/public-ipv4", type: "text" },
-    // 备用国内/国际通用服务
-    { url: "https://api.ipify.org?format=json", type: "json" },
-    { url: "https://myip.ipip.net/s", type: "text" }, // 国内常用的 IPIP.net
-    { url: "https://ddns.oray.com/checkip", type: "text" }, // 花生壳
-    { url: "https://ifconfig.me/ip", type: "text" }
+  console.log(`[SYSTEM] 正在触发公网 IP 更新程序...`);
+
+  const sources = [
+    { name: "Ipify", url: "https://api.ipify.org?format=json", timeout: 3000 },
+    { name: "Aliyun Metadata", url: "http://100.100.100.200/latest/meta-data/public-ipv4", timeout: 2000, headers: { 'Metadata': 'true' } },
+    { name: "IPIP.net", url: "https://myip.ipip.net/s", timeout: 3000 },
+    { name: "Ifconfig.me", url: "https://ifconfig.me/ip", timeout: 3000 },
+    { name: "Amazon", url: "https://checkip.amazonaws.com", timeout: 3000 },
+    { name: "Akamai", url: "http://whatismyip.akamai.com", timeout: 3000 }
   ];
 
-  console.log(`[SYSTEM] 正在启动公网 IP 识别程序，共有 ${services.length} 个备选源...`);
-
-  for (const service of services) {
-    const hostname = new URL(service.url).hostname;
-    try {
-      console.log(`[SYSTEM] 正在尝试通过源 [${hostname}] 获取 IP...`);
-      const response = await axios.get(service.url, { timeout: 3000 });
-      let ip = "";
-      
-      if (service.type === "json") {
-        ip = response.data.ip || response.data.ip_addr || response.data.query;
-      } else {
-        // 处理纯文本返回，并过滤掉可能的换行符
-        ip = String(response.data).trim();
-      }
-
-      // 简单的 IP 格式校验
-      if (ip && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ip)) {
-        const oldIp = lastOutboundIp;
-        lastOutboundIp = ip;
-        console.log(`[SYSTEM] 识别成功! 来源: ${hostname}, 获取到的 IP: ${lastOutboundIp}`);
-        if (oldIp !== "正在获取..." && oldIp !== ip) {
-          console.log(`[SYSTEM] 检测到 IP 变动: ${oldIp} -> ${ip}`);
+  const tasks = sources.map(source => {
+    return (async () => {
+      try {
+        const res = await axios.get(source.url, { 
+          timeout: source.timeout, 
+          headers: source.headers || {} 
+        });
+        let data = "";
+        if (typeof res.data === 'object' && res.data.ip) {
+          data = res.data.ip;
+        } else {
+          data = String(res.data).trim();
         }
-        return;
-      } else {
-        console.warn(`[SYSTEM] 源 [${hostname}] 返回了无效的 IP 格式: "${ip.substring(0, 50)}"`);
+        const ipMatch = data.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}/);
+        if (ipMatch) {
+          return ipMatch[0];
+        }
+        throw new Error(`无效响应`);
+      } catch (err) {
+        throw err;
       }
-    } catch (e: any) {
-      console.warn(`[SYSTEM] 源 [${hostname}] 获取失败: ${e.message}`);
+    })();
+  });
+
+  try {
+    const fastIp = await Promise.any(tasks);
+    lastOutboundIp = fastIp;
+    console.log(`[SYSTEM] 当前公网 IP 已确认: ${lastOutboundIp}`);
+  } catch (e) {
+    console.warn("[SYSTEM] 无法获取公网 IP，正在尝试获取本地 IP...");
+    const interfaces = os.networkInterfaces();
+    let localIp = "127.0.0.1";
+    for (const k in interfaces) {
+      const iface = interfaces[k];
+      if (iface) {
+        for (const address of iface) {
+          if (address.family === "IPv4" && !address.internal) {
+            localIp = address.address;
+            break;
+          }
+        }
+      }
+      if (localIp !== "127.0.0.1") break;
     }
-  }
-  
-  if (lastOutboundIp === "正在获取...") {
-    lastOutboundIp = "识别失败 (请检查安全组设置)";
-    console.error("[SYSTEM] 关键错误: 所有备选源均无法获取公网 IP。请检查服务器出方向网络及安全组设置。");
-  } else {
-    console.warn("[SYSTEM] 本次自动更新 IP 失败，将继续使用旧 IP: " + lastOutboundIp);
+    lastOutboundIp = localIp;
+    console.log(`[SYSTEM] 已回退至本地 IP: ${lastOutboundIp}`);
   }
 }
 
-// 3. 程序启动时立即执行一次初始化获取
+// 3. 初始化与定时任务
 updateOutboundIp();
-
-// 4. 设置定时任务：每 1 小时自动更新一次 IP
-// 3600000 毫秒 = 60 分钟 * 60 秒 * 1000 毫秒
-setInterval(updateOutboundIp, 3600000);
+setInterval(updateOutboundIp, 3600000); // 每小时更新一次
 
 /**
- * 5. 注册 API 路由：供前端 UI 查询当前 IP
- * 路径: GET /api/system/ip
+ * 4. API 路由：获取当前 IP
  */
 app.get("/api/system/ip", async (req, res) => {
-  // 如果请求参数中包含 refresh=true，则立即触发一次后端更新逻辑
   if (req.query.refresh === 'true') {
     await updateOutboundIp();
   }
-  
-  // 返回 JSON 格式的 IP 数据
-  res.json({ ip: lastOutboundIp });
+  res.json({ ip: lastOutboundIp, hostname: serverHostname });
 });
 
-// Binance API Proxy with Signing
+/**
+ * 4.1 新增：参考用户要求的 IP 获取接口
+ */
+app.get("/api/server-info", async (req, res) => {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    res.json({ 
+      ip: data.ip,
+      hostname: os.hostname()
+    });
+  } catch (error) {
+    const interfaces = os.networkInterfaces();
+    let localIp = "127.0.0.1";
+    for (const k in interfaces) {
+      const iface = interfaces[k];
+      if (iface) {
+        for (const address of iface) {
+          if (address.family === "IPv4" && !address.internal) {
+            localIp = address.address;
+            break;
+          }
+        }
+      }
+      if (localIp !== "127.0.0.1") break;
+    }
+    res.json({ ip: localIp, hostname: os.hostname() });
+  }
+});
+
+// Helper for Binance Signature (using CryptoJS as requested)
+const getBinanceSignature = (queryString: string, secret: string) => {
+  return CryptoJS.HmacSHA256(queryString, secret).toString(CryptoJS.enc.Hex);
+};
+
+/**
+ * 5. Binance API Proxy
+ */
+// 新增：参考用户要求的 Proxy 接口
+app.post("/api/binance-proxy", async (req, res) => {
+  const { method, endpoint, params, apiKey, apiSecret } = req.body;
+
+  if (!apiKey || !apiSecret) {
+    return res.status(400).json({ error: "Missing API credentials" });
+  }
+
+  try {
+    const timestamp = Date.now();
+    const baseParams = {
+      ...(params || {}),
+      timestamp: timestamp.toString(),
+    };
+
+    const queryString = new URLSearchParams(baseParams).toString();
+    const signature = getBinanceSignature(queryString, apiSecret);
+    
+    const safeEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const baseUrl = req.body.baseUrl || "https://fapi.binance.com";
+    
+    let url = `${baseUrl}${safeEndpoint}`;
+    let options: RequestInit = {
+      method: method || "GET",
+      headers: {
+        "X-MBX-APIKEY": apiKey,
+      },
+    };
+
+    if (options.method === "POST" || options.method === "PUT" || options.method === "DELETE") {
+      const bodyParams = new URLSearchParams({
+        ...baseParams,
+        signature: signature,
+      });
+      options.body = bodyParams.toString();
+      options.headers = {
+        ...options.headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      };
+    } else {
+      url += `?${queryString}&signature=${signature}`;
+    }
+
+    const response = await fetch(url, options);
+    const responseText = await response.text();
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      return res.status(response.status).json({ 
+        error: "Binance API returned a non-JSON response.",
+        status: response.status,
+        url: url,
+        details: responseText.substring(0, 500)
+      });
+    }
+
+    res.status(response.status).json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Internal Server Error" });
+  }
+});
+
+// 保留原有的通配符 Proxy 接口以兼容前端
 app.all("/api/binance/*", async (req, res) => {
   const apiKey = req.headers["x-mbx-apikey"] as string || process.env.BINANCE_API_KEY;
   const apiSecret = req.headers["x-mbx-apisecret"] as string || process.env.BINANCE_SECRET_KEY;
   let baseUrl = (req.headers["x-mbx-baseurl"] as string) || process.env.BINANCE_BASE_URL || "https://fapi.binance.com";
-  // Remove trailing slash if present
+  
   if (baseUrl.endsWith("/")) {
     baseUrl = baseUrl.slice(0, -1);
   }
@@ -109,12 +215,10 @@ app.all("/api/binance/*", async (req, res) => {
   const query = { ...req.query };
   const body = req.body;
 
-  // Add timestamp if needed for signed endpoints
   if (apiSecret && !query.timestamp) {
     query.timestamp = Date.now().toString();
   }
 
-  // Create query string using URLSearchParams for proper encoding
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, val]) => {
     if (val !== undefined && val !== null) {
@@ -122,7 +226,6 @@ app.all("/api/binance/*", async (req, res) => {
     }
   });
 
-  // Sign if secret exists
   if (apiSecret) {
     const queryStringToSign = params.toString();
     const signature = crypto
@@ -142,9 +245,6 @@ app.all("/api/binance/*", async (req, res) => {
       "X-MBX-APIKEY": apiKey,
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Cache-Control": "no-cache",
-      "Pragma": "no-cache",
     },
     timeout: 10000,
   };
@@ -161,10 +261,9 @@ app.all("/api/binance/*", async (req, res) => {
     let status = error.response?.status || 500;
     let data = error.response?.data || { message: error.message };
     
-    // Fallback mechanism for 403/CloudFront errors
+    // Binance 403 Fallback 逻辑
     if (status === 403 && baseUrl.includes("fapi.binance.com")) {
       const fallbackUrl = url.replace("fapi.binance.com", "fapi1.binance.com");
-      console.log(`[BINANCE 403 FALLBACK] Retrying with: ${fallbackUrl}`);
       try {
         const fallbackResponse = await axios({ ...axiosConfig, url: fallbackUrl });
         return res.json(fallbackResponse.data);
@@ -174,21 +273,16 @@ app.all("/api/binance/*", async (req, res) => {
       }
     }
     
-    // Detailed logging for debugging 401/403 errors
     if (status === 401 || status === 403) {
-      console.error(`[BINANCE ERROR ${status}]`);
-      console.error(`- URL: ${url}`);
-      console.error(`- Method: ${method}`);
-      console.error(`- Outbound IP: ${lastOutboundIp}`);
-      console.error(`- API Key (First 5): ${apiKey?.substring(0, 5)}...`);
-      console.error(`- Response:`, typeof data === 'string' ? data.substring(0, 500) : JSON.stringify(data));
+      console.error(`[BINANCE ERROR ${status}] IP: ${lastOutboundIp} URL: ${url}`);
     }
-    
     res.status(status).json(data);
   }
 });
 
-// Email Notification Endpoint
+/**
+ * 6. Email Notification (保留原逻辑)
+ */
 app.post("/api/notify", async (req, res) => {
   const { subject, text } = req.body;
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, NOTIFICATION_EMAIL } = process.env;
@@ -201,10 +295,7 @@ app.post("/api/notify", async (req, res) => {
     host: SMTP_HOST,
     port: Number(SMTP_PORT) || 587,
     secure: Number(SMTP_PORT) === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
 
   try {
@@ -220,6 +311,9 @@ app.post("/api/notify", async (req, res) => {
   }
 });
 
+/**
+ * 7. Server Start
+ */
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -235,8 +329,10 @@ async function startServer() {
     });
   }
 
+  // 监听 0.0.0.0 以允许外部访问
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running at http://0.0.0.0:${PORT}`);
+    console.log(`Initial Outbound IP Check in progress...`);
   });
 }
 
