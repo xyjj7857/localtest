@@ -95,7 +95,17 @@ export default function App() {
     setIpAddress("正在更新...");
     try {
       const res = await fetch("/api/server-info");
-      const data = await res.json();
+      const text = await res.text();
+      
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (parseError) {
+        const snippet = text.substring(0, 100).replace(/</g, "&lt;");
+        addLog(`解析 JSON 失败。返回内容前100字: ${snippet}`, "error", "SYSTEM");
+        throw new Error("服务器返回了非 JSON 格式的内容（可能是 HTML 404 页面）");
+      }
+
       setIpAddress(data.ip || "Unknown");
       setLocalIp(data.localIp || "127.0.0.1");
       
