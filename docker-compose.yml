@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  iptest-app:
+    build: .
+    container_name: ip30-service
+    ports:
+      - "3030:3000"  # 外部访问 3030，映射到内部 Node 服务的 3000
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: always
+    dns:
+      - 8.8.8.8
+      - 114.114.114.114
+    networks:
+      - iptest-network
+   
+networks:
+  iptest-network:
+    driver: bridge
